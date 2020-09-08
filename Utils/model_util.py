@@ -51,18 +51,36 @@ class scDGN(nn.Module):
         self.label_classifier = nn.Sequential(
             nn.Linear(self.dim2, self.dim_label),
         )
+
+        self.decoder1 = nn.Sequential(
+            nn.Linear(self.dim2,self.dim1),
+            nn.Tanh(),
+            nn.Linear(self.dim1,self.d_dim),
+            nn.Tanh()
+        )
+        self.decoder2 = nn.Sequential(
+            nn.Linear(self.dim2,self.dim1),
+            nn.Tanh(),
+            nn.Linear(self.dim1,self.d_dim),
+            nn.Tanh()
+        )
+
         print(self)
     def forward(self, x1, x2=None, mode='train', alpha=1):
         feature = self.feature_extractor(x1)
         reverse_feature = ReverseLayerF.apply(feature, alpha)
         class_output = self.label_classifier(feature)
+        decoder_output1 = self.decoder1(feature)
+        decoder_output2 = self.decoder2(feature)
         if mode == 'train':
             domain_output1 = self.domain_classifier(reverse_feature)
             feature2 = self.feature_extractor(x2)
             reverse_feature2 = ReverseLayerF.apply(feature2, alpha)
             domain_output2 = self.domain_classifier(reverse_feature2)
-            return class_output, domain_output1, domain_output2
+            #return class_output,domain_output1,domain_output2
+            return class_output,decoder_output1,decoder_output2, domain_output1, domain_output2
         elif mode == 'test':
+            #return decoder_output1,decoder_output2
             return class_output
         elif mode == 'eval':
             return feature
