@@ -156,7 +156,7 @@ class ClassicTrainer(BaseTrainer):
         if self.validation:
             f.write("Best Validated Model Prediction Accuracy = %.4f\n" % (score))
         f.write('After Training, Test Accuracy: {:0.3f}\n'.format(self.test()))
-        self.save_model(os.path.join(self.out_path, 'final_model.ckpt'))
+        self.save_model(os.path.join(self.out_path, 'final_model_.ckpt'))
 
 
 class ADGTrainer(BaseTrainer):
@@ -167,6 +167,8 @@ class ADGTrainer(BaseTrainer):
         self.dim_domain = dim_domain
         self.D = scDGN(self.d_dim, self.dim1, self.dim2, self.dim_label, self.dim_domain).cuda()
         self.L_L = nn.CrossEntropyLoss().cuda()
+        self.decoder_loss1 = nn.CosineEmbeddingLoss().cuda()
+        self.decoder_loss2 = nn.CosineEmbeddingLoss().cuda()
         self.L_D = ContrastiveLoss(margin=margin).cuda()
         self.optimizer = optim.SGD([{'params':self.D.parameters()}], lr=1e-3, momentum=0.9, weight_decay=1e-6, nesterov=True)
     def train(self, f):
@@ -195,19 +197,27 @@ class ADGTrainer(BaseTrainer):
                 Z = Variable(torch.cuda.LongTensor(z))
                 U = Variable(torch.cuda.FloatTensor(u))
                 self.optimizer.zero_grad()
-                label_output, domain_output1, domain_output2 = self.D(X1, X2, mode='train')
+                #label_output, domain_output1, domain_output2 = self.D(X1, X2, mode='train')
+                label_output,decoder_output1,decoder_output2, domain_output1, domain_output2 = self.D(X1, X2, mode='train')
                 label_loss = self.L_L(label_output, Y)
                 domain_loss = self.L_D(domain_output1, domain_output2, Z, U)
-                self.loss = label_loss + self.lamb*domain_loss
+                dec_loss1 = self.decoder_loss1(decoder_output1,X1,torch.cuda.FloatTensor(1))
+                dec_loss2 = self.decoder_loss2(decoder_output2,X2,torch.cuda.FloatTensor(1))
+
+                #self.loss = label_loss + self.lamb*domain_loss
+                self.loss = label_loss + dec_loss1+dec_loss2+ self.lamb*domain_loss
+
                 label_loss_val = label_loss.data.cpu().numpy()
                 domain_loss_val = domain_loss.data.cpu().numpy()
                 sum_acc += (label_output.max(dim=1)[1] == Y).float().sum().data.cpu().numpy()
                 train_data.set_description('Train label loss: {0:.4f}'.format(float(label_loss_val))+', domain loss: {0:.4f}'.format(float(domain_loss_val)))
                 self.loss.backward()
                 self.optimizer.step()
-                train_epoch_loss.append(label_loss_val)
+                #train_epoch_loss.append(label_loss_val)
+                train_epoch_loss.append(dec_loss1+dec_loss2+label_loss)
                 adv_epoch_loss.append(domain_loss_val)
-                del X1, X2, Y, Z, U, label_output, domain_output1, domain_output2, label_loss
+                #del X1, X2, Y, Z, U, label_output, domain_output1, domain_output2, label_loss
+                del X1, X2, Y, Z, U, label_output, domain_output1, domain_output2, decoder_output1, decoder_output2, label_loss,dec_loss1,dec_loss2
                 #calculate validation loss
                 if self.validation:
                     X_v = Variable(torch.cuda.FloatTensor(x_valid1))
