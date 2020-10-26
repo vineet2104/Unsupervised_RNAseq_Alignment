@@ -8,11 +8,11 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.autograd import Variable
 
-from .model_util import ClassicNN, scDGN
+from .model_util import ClassicNN, scDGN,scDGN_modified
 from .loss_util import ContrastiveLoss
 
 class BaseTrainer(object):
-    def __init__(self, d_dim, dim1, dim2, dim_label, num_epochs, batch_size, model_path, use_gpu, validation=True):
+    def __init__(self, d_dim, dim1, dim2, dim_label, num_epochs, batch_size, model_path, use_gpu, exp_id,validation=True):
         super(BaseTrainer, self).__init__()
         self.dim1 = dim1
         self.dim2 = dim2
@@ -23,6 +23,7 @@ class BaseTrainer(object):
         self.use_gpu = use_gpu
         self.validation = validation
         self.out_path = model_path
+        self.exp_id = exp_id
         
     def initialize(self):
         for p in self.D.parameters():
@@ -32,7 +33,7 @@ class BaseTrainer(object):
                 nn.init.normal(p, 0, 1)
 
     def load_model(self, model_file):
-        skpt_dict = torch.load(model_path)
+        skpt_dict = torch.load(model_file)
         self.D.load_state_dict(skpt_dict)
 
     def save_model(self, model_file):
@@ -76,8 +77,8 @@ class BaseTrainer(object):
         return valid_acc
 
 class ClassicTrainer(BaseTrainer):
-    def __init__(self, d_dim, dim1, dim2, dim_label, num_epochs, batch_size, model_path, use_gpu, validation=True):
-        super(ClassicTrainer, self).__init__(d_dim, dim1, dim2, dim_label, num_epochs, batch_size, model_path, use_gpu, validation)
+    def __init__(self, d_dim, dim1, dim2, dim_label, num_epochs, batch_size, model_path, exp_id,use_gpu, validation=True):
+        super(ClassicTrainer, self).__init__(d_dim, dim1, dim2, dim_label, num_epochs, batch_size, model_path,exp_id, use_gpu,  validation)
         if self.use_gpu:
             self.D = ClassicNN(self.d_dim, self.dim1, self.dim2, self.dim_label).cuda()
             self.L = nn.CrossEntropyLoss().cuda()
@@ -159,13 +160,16 @@ class ClassicTrainer(BaseTrainer):
         self.save_model(os.path.join(self.out_path, 'final_model_.ckpt'))
 
 
-class ADGTrainer(BaseTrainer):
-    def __init__(self, d_dim, margin, lamb, dim1, dim2, dim_label, dim_domain, num_epochs, batch_size, model_path, use_gpu=True, validation=True):
+class ADGTrainer_modified(BaseTrainer):
+    def __init__(self, d_dim, margin, lamb, dim1, dim2, dim_label, dim_domain, num_epochs, batch_size, model_path, exp_id,use_gpu=True, validation=True):
         #Setup network
-        super(ADGTrainer, self).__init__(d_dim, dim1, dim2, dim_label, num_epochs, batch_size, model_path, use_gpu, validation)
+        super(ADGTrainer_modified, self).__init__(d_dim, dim1, dim2, dim_label, num_epochs, batch_size, model_path,exp_id , use_gpu,validation)
         self.lamb = lamb
         self.dim_domain = dim_domain
-        self.D = scDGN(self.d_dim, self.dim1, self.dim2, self.dim_label, self.dim_domain).cuda()
+        if(use_gpu):
+            self.D = scDGN_modified(self.d_dim, self.dim1, self.dim2, self.dim_label, self.dim_domain).cuda()
+        else:
+            self.D = scDGN_modified(self.d_dim, self.dim1, self.dim2, self.dim_label, self.dim_domain)
         self.L_L = nn.CrossEntropyLoss().cuda()
         self.decoder_loss1 = nn.CosineEmbeddingLoss().cuda()
         self.decoder_loss2 = nn.CosineEmbeddingLoss().cuda()
@@ -249,5 +253,96 @@ class ADGTrainer(BaseTrainer):
         if self.validation:
             f.write("Best Validated Model Prediction Accuracy = %.4f\n" % (score))
         f.write('After Training, Test Accuracy: {:0.3f}\n'.format(self.test()))
-        self.save_model(os.path.join(self.out_path, 'final_model.ckpt'))
+        model_save_name = 'final_model_modified_artificial_'+str(self.exp_id)+'.ckpt'
+        self.save_model(os.path.join(self.out_path,model_save_name ))
 
+
+class ADGTrainer(BaseTrainer):
+    def __init__(self, d_dim, margin, lamb, dim1, dim2, dim_label, dim_domain, num_epochs, batch_size, model_path,exp_id, use_gpu=True, validation=True):
+        #Setup network
+        super(ADGTrainer, self).__init__(d_dim, dim1, dim2, dim_label, num_epochs, batch_size, model_path, exp_id,use_gpu,  validation)
+        self.lamb = lamb
+        self.dim_domain = dim_domain
+        if(use_gpu):
+            self.D = scDGN(self.d_dim, self.dim1, self.dim2, self.dim_label, self.dim_domain).cuda()
+        else:
+            self.D = scDGN(self.d_dim, self.dim1, self.dim2, self.dim_label, self.dim_domain)
+        self.L_L = nn.CrossEntropyLoss().cuda()
+        self.decoder_loss1 = nn.CosineEmbeddingLoss().cuda()
+        self.decoder_loss2 = nn.CosineEmbeddingLoss().cuda()
+        self.L_D = ContrastiveLoss(margin=margin).cuda()
+        self.optimizer = optim.SGD([{'params':self.D.parameters()}], lr=1e-3, momentum=0.9, weight_decay=1e-6, nesterov=True)
+    def train(self, f):
+        self.D.train()
+        self.initialize()
+        loss_val = float('inf')
+        self.train_loss = []
+        self.adv_loss = []
+        self.valid_accs = []
+        best_validate_acc = 0.0
+        for j in range(self.num_epochs):
+            begin = time.time()
+            counts = 0
+            sum_acc = 0.0
+            valid_sum_acc = 0.0
+            train_epoch_loss = []
+            adv_epoch_loss = []
+            valid_epoch_loss = []
+            train_data = self.dataset.train_data(float(loss_val))
+            for x1, x2, y, z, u, x_valid1, y_valid in train_data:
+                #forward calculation and back propagation
+                counts += len(y)
+                X1 = Variable(torch.cuda.FloatTensor(x1))
+                X2 = Variable(torch.cuda.FloatTensor(x2))
+                Y = Variable(torch.cuda.LongTensor(y))
+                Z = Variable(torch.cuda.LongTensor(z))
+                U = Variable(torch.cuda.FloatTensor(u))
+                self.optimizer.zero_grad()
+                label_output, domain_output1, domain_output2 = self.D(X1, X2, mode='train')
+                label_loss = self.L_L(label_output, Y)
+                domain_loss = self.L_D(domain_output1, domain_output2, Z, U)
+
+                self.loss = label_loss + self.lamb*domain_loss
+
+                label_loss_val = label_loss.data.cpu().numpy()
+                domain_loss_val = domain_loss.data.cpu().numpy()
+                sum_acc += (label_output.max(dim=1)[1] == Y).float().sum().data.cpu().numpy()
+                train_data.set_description('Train label loss: {0:.4f}'.format(float(label_loss_val))+', domain loss: {0:.4f}'.format(float(domain_loss_val)))
+                self.loss.backward()
+                self.optimizer.step()
+                train_epoch_loss.append(label_loss_val)
+                adv_epoch_loss.append(domain_loss_val)
+                del X1, X2, Y, Z, U, label_output, domain_output1, domain_output2, label_loss
+                #calculate validation loss
+                if self.validation:
+                    X_v = Variable(torch.cuda.FloatTensor(x_valid1))
+                    Y_v = Variable(torch.cuda.LongTensor(y_valid))
+                    label_output = self.D(X_v, mode='test' )
+                    loss = self.L_L(label_output, Y_v)
+                    loss_val = loss.data.cpu().numpy()
+                    valid_epoch_loss.append(loss_val)
+                    valid_sum_acc += (label_output.max(dim=1)[1] == Y_v).float().sum().data.cpu().numpy()
+                    del X_v,Y_v,label_output
+            self.train_acc = sum_acc/counts
+            self.train_loss.append(np.sum(train_epoch_loss)/(counts/self.batch_size))
+            self.adv_loss.append(np.sum(adv_epoch_loss)/(counts/self.batch_size))
+            if self.validation:
+                valid_acc = valid_sum_acc/counts
+                self.valid_accs.append(valid_acc)
+                f.write("Epoch %d, time = %ds, train accuracy = %.4f, train loss = %.4f, adv loss = %.4f, validation accuracy = %.4f\n" % (
+                        j, time.time() - begin, self.train_acc, self.train_loss[-1], self.adv_loss[-1], valid_acc))
+                if self.valid_accs[-1] > best_validate_acc:
+                    best_validate_acc = self.valid_accs[-1]
+                    score = self.test()
+                    f.write("Best Validated Model Prediction Accuracy = %.4f\n" % (score))
+                    self.save_model(os.path.join(self.out_path, 'best_model.ckpt'))
+            else:
+                f.write("Epoch %d, time = %ds, train accuracy = %.4f, train loss = %.4f, adv loss = %.4f, test accuracy = %.4f\n" % (
+                        j, time.time() - begin, self.train_acc, self.train_loss[-1], self.adv_loss[-1], self.test()))
+            if j%10==9:
+                tqdm.write('After epoch {0} Train Accuracy: {1:0.3f}'.format(j+1, self.train_acc))
+        if self.validation:
+            f.write("Best Validated Model Prediction Accuracy = %.4f\n" % (score))
+        f.write('After Training, Test Accuracy: {:0.3f}\n'.format(self.test()))
+        model_save_name = 'final_model_original_artificial_'+str(self.exp_id)+'.ckpt'
+        self.save_model(os.path.join(self.out_path, model_save_name))
