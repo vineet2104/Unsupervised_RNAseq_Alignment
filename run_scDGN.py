@@ -1,10 +1,10 @@
 import os
 import argparse
-from utils.train_util import ClassicTrainer, ADGTrainer
+from utils.train_util import ClassicTrainer, ADGTrainer,ADGTrainer_modified
 from utils.data_util import dataset, dataset_CADG
 
 N_CELL_TYPES = {'scquery':39, 'pbmc':10, 'pancreas1': 13, 'pancreas2': 13, 'pancreas3': 13, 
-                'pancreas4': 13, 'pancreas5': 13, 'pancreas6': 13,}
+                'pancreas4': 13, 'pancreas5': 13, 'pancreas6': 13,'artificial':2,}
 
 N_GENES = {'scquery':20499, 'pbmc':3000, 'pancreas1': 3000, 'pancreas2': 3000, 'pancreas3': 3000, 
                 'pancreas4': 3000, 'pancreas5': 3000, 'pancreas6': 3000,}
@@ -14,10 +14,15 @@ def train(args, dim_i, dim_o, data_path):
     if not os.path.exists(model_path):
         os.mkdir(model_path)
     if args.adv_flag:
-        dataloader = dataset_CADG(data_path, args.batch_size, label_size=dim_o, dataset_name=args.dataset, validation=args.dataset)
-        trainer = ADGTrainer(dim_i, args.margin, args.lamb, args.dim1, args.dim2, dim_o, args.dimd, args.epochs, 
-                        args.batch_size, model_path, use_gpu=args.use_gpu, validation=args.validation)
-        log_file = '%s_scDGN_margin%.2f_lambda%.2f_%s.txt'%(args.dataset, args.margin, args.lamb, args.output)
+        dataloader = dataset_CADG(data_path, args.batch_size,args.id, label_size=dim_o, dataset_name=args.dataset, validation=args.dataset)
+        if(args.usage=='modified'):
+            trainer = ADGTrainer_modified(dim_i, args.margin, args.lamb, args.dim1, args.dim2, dim_o, args.dimd, args.epochs, 
+                        args.batch_size, model_path,exp_id=args.id, use_gpu=args.use_gpu, validation=args.validation)
+            log_file = '%s_scDGN_margin%.2f_lambda%.2f_%s_modified_%.2f.txt'%(args.dataset, args.margin, args.lamb, args.output,args.id)
+        else:
+            trainer = ADGTrainer(dim_i, args.margin, args.lamb, args.dim1, args.dim2, dim_o, args.dimd, args.epochs, 
+                      args.batch_size, model_path, exp_id=args.id,use_gpu=args.use_gpu, validation=args.validation)
+            log_file = '%s_scDGN_margin%.2f_lambda%.2f_%s_original_%.2f.txt'%(args.dataset, args.margin, args.lamb, args.output,args.id)
     else:
         dataloader = dataset(data_path, args.batch_size, label_size=dim_o, dataset_name=args.dataset, validation=args.dataset)
         trainer = ClassicTrainer(dim_i, args.dim1, args.dim2, dim_o, args.epochs, args.batch_size, 
@@ -50,6 +55,8 @@ if __name__ == "__main__":
     parser.add_argument('-m', '--margin', type=float, default=1.0, help='margin of contrastive loss')
     parser.add_argument('--use_gpu', type=int, default=1, help='use gpu to train the model')
     parser.add_argument('-g', '--gpu_id', type=str, default='0', help='gpuid used for training')
+    parser.add_argument('-u','--usage',type=str,default='original',help='Which model to use')
+    parser.add_argument('-id','--id',type=int,default=101,help='experiment id')
 
     args = parser.parse_args()
 
@@ -62,8 +69,19 @@ if __name__ == "__main__":
     if not os.path.exists(args.ckpts):
         os.mkdir(args.ckpts)
 
-    n_labels = N_CELL_TYPES[args.dataset]
-    n_genes = N_GENES[args.dataset]
-    data_path = 'C:\\Users\\vinee\\OneDrive\\Desktop\\Yale-Bio Project\\scDGN-master (1)\\scDGN-master\\scDGN\\data\\'
-    train(args, n_genes, n_labels, data_path)
+    if(args.dataset=='artificial'):
+        n_labels = 4
+        n_genes = 2
+        data_path = 'C:\\Users\\vinee\\OneDrive\\Desktop\\Yale-Bio Project\\scDGN-master (1)\\scDGN-master\\scDGN\\'
+        train(args, n_genes, n_labels, data_path)
+    elif(args.dataset == 'artificial_new' or args.dataset == 'artificial_new_random'):
+        n_labels = 3
+        n_genes = 2
+        data_path = 'C:\\Users\\vinee\\OneDrive\\Desktop\\Yale-Bio Project\\scDGN-master (1)\\scDGN-master\\scDGN\\'
+        train(args,n_genes,n_labels,data_path)
+    else:
+        n_labels = N_CELL_TYPES[args.dataset]
+        n_genes = N_GENES[args.dataset]
+        data_path = 'C:\\Users\\vinee\\OneDrive\\Desktop\\Yale-Bio Project\\scDGN-master (1)\\scDGN-master\\scDGN\\data\\'
+        train(args, n_genes, n_labels, data_path)
     
