@@ -1,19 +1,74 @@
 import os
+import os
 import numpy as np
 from tqdm import tqdm, trange
+import random
 
 class dataset(object):
-    def __init__(self, data_path, batch_size, label_size=46, dataset_name=None, validation=True):
+    def __init__(self, data_path, batch_size,exp_id, label_size=46, dataset_name=None, validation=True):
         super(dataset, self).__init__()
         self.data_path = data_path
         self.batch_size = batch_size
+        self.exp_id = exp_id
         self.label_size = label_size
         self.dataset_name = dataset_name
         self.validation = validation
         self.init_dataset()
     def init_dataset(self):
         print('loading dataset: %s'%self.dataset_name)
-        if self.dataset_name == 'scquery':
+        if(self.dataset_name =='artificial'):
+            print('Artificial Data Chosen')
+            data_file = 'C:\\Users\\vinee\\OneDrive\\Desktop\\Yale-Bio Project\\scDGN-master (1)\\scDGN-master\\arti_data4.npz'
+            all_set = np.load(data_file)
+            self.train_set = {'features':all_set['features'][:-900], 'labels': all_set['labels'][:-900], 'accessions':all_set['accessions'][:-900]}
+            self.test_set = {'features':all_set['features'][-900:], 'labels': all_set['labels'][-900:], 'accessions':all_set['accessions'][-900:]}
+        elif(self.dataset_name =='artificial_new'):
+            print("New Artificial Dataset Chosen (Not Random)!")
+            data_file = 'C:\\Users\\vinee\\OneDrive\\Desktop\\Yale-Bio Project\\scDGN-master (1)\\scDGN-master\\artificial_data5.npz'
+            all_set = np.load(data_file)
+            self.train_set = {'features':all_set['features'][:-1350], 'labels': all_set['labels'][:-1350], 'accessions':all_set['accessions'][:-1350]}
+            self.test_set = {'features':all_set['features'][-1350:], 'labels': all_set['labels'][-1350:], 'accessions':all_set['accessions'][-1350:]}
+
+        elif(self.dataset_name =='artificial_new_random'):
+            print("New Artificial Dataset chosen(Randomized)!")
+            data_file = 'C:\\Users\\vinee\\OneDrive\\Desktop\\Yale-Bio Project\\scDGN-master (1)\\scDGN-master\\artificial_data5.npz'
+            all_set = np.load(data_file)
+            data_set_length = all_set['features'].shape[0]
+            train_set_length = int(0.7*data_set_length)
+            test_set_length = data_set_length - train_set_length
+            dataset_index = []
+            for i in range(data_set_length):
+                dataset_index.append(i)
+            train_set_indexes = random.sample(dataset_index,train_set_length)
+            train_set_indexes_array = np.array(train_set_indexes)
+            np.save(file='C:\\Users\\vinee\\OneDrive\\Desktop\\Yale-Bio Project\\scDGN-master (1)\\Rough\\train_set_indexes_'+str(self.exp_id)+'.npy',arr=train_set_indexes_array)
+            features_ = []
+            labels_ = []
+            accessions_ = []
+            for i in (train_set_indexes):
+                features_.append(all_set['features'][i])
+                labels_.append(all_set['labels'][i])
+                accessions_.append(all_set['accessions'][i])
+                dataset_index[i] = -1
+            np.save(file='C:\\Users\\vinee\\OneDrive\\Desktop\\Yale-Bio Project\\scDGN-master (1)\\Rough\\test_set_indexes_'+str(self.exp_id)+'.npy',arr=dataset_index)
+            features_test = []
+            labels_test = []
+            accessions_test = []
+            for j in dataset_index:
+                if(j==-1):
+                    continue
+                features_test.append(all_set['features'][j])
+                labels_test.append(all_set['labels'][j])
+                accessions_test.append(all_set['accessions'][j])
+
+            print("Length of Train Set = "+str(len(labels_)))
+            print("Length of Test Set = "+str(len(labels_test)))
+            
+            self.train_set = {'features':np.array(features_), 'labels': np.array(labels_), 'accessions':np.array(accessions_)}
+            self.test_set = {'features':np.array(features_test), 'labels': np.array(labels_test), 'accessions':np.array(accessions_test)}
+
+
+        elif self.dataset_name == 'scquery':
             self.train_set = np.load(os.path.join(self.data_path, 'train_scquery.npz'))
             self.valid_set = np.load(os.path.join(self.data_path, 'valid_scquery.npz'))
             self.test_set = np.load(os.path.join(self.data_path, 'test_scquery.npz'))
@@ -114,6 +169,7 @@ class dataset(object):
             end += self.batch_size
 
     def valid_data(self):
+
         return tqdm(self.next_valid_batch(), desc='Valid Iterations: ',
                     total=self.num_valid_batches, leave=False )
 
@@ -149,8 +205,8 @@ class dataset(object):
         return sum_mi, scipy.stats.entropy(Px, base=2), scipy.stats.entropy(Py, base=2)
 
 class dataset_DG(dataset):
-    def __init__(self, data_path, batch_size, label_size, dataset_name=None, validation=True):
-        super(dataset_DG, self).__init__(data_path, batch_size, label_size, dataset_name, validation)
+    def __init__(self, data_path, batch_size,exp_id, label_size, dataset_name=None, validation=True):
+        super(dataset_DG, self).__init__(data_path, batch_size,exp_id, label_size, dataset_name, validation)
         self.prepare_siamese()
         
     def prepare_siamese(self):
@@ -225,8 +281,8 @@ class dataset_ADG(dataset_DG):
             
 
 class dataset_CADG(dataset_DG):
-    def __init__(self, data_path, batch_size, label_size, dataset_name=None, validation=True):
-        super(dataset_CADG, self).__init__(data_path, batch_size, label_size, dataset_name, validation)
+    def __init__(self, data_path, batch_size,exp_id, label_size, dataset_name=None, validation=True):
+        super(dataset_CADG, self).__init__(data_path, batch_size,exp_id, label_size, dataset_name, validation)
     
     def prepare_siamese(self):
         self._train_X2 = np.zeros(self._train_X.shape)
